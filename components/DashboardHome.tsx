@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   Line, LineChart, Area, ComposedChart
@@ -53,9 +53,23 @@ const DashboardHome: React.FC<DashboardHomeProps> = ({
 }) => {
   const [evolutionData, setEvolutionData] = useState(generateHighDensityData());
   const [liveMetrics, setLiveMetrics] = useState({ ingress: 14.8, drop: 0.02 });
+  const [displayStats, setDisplayStats] = useState<DashboardStats>(stats);
+
+  // Synchronize displayStats with incoming props when they change significantly (e.g., after a scan)
+  useEffect(() => {
+    setDisplayStats(prev => ({
+      ...stats,
+      // Keep the "noise" we might have added, but ensure we don't fall behind the truth
+      totalIoCs: Math.max(prev.totalIoCs, stats.totalIoCs),
+      activeThreats: stats.activeThreats,
+      activeFeeds: stats.activeFeeds,
+      alerts24h: Math.max(prev.alerts24h, stats.alerts24h)
+    }));
+  }, [stats]);
 
   useEffect(() => {
     const interval = setInterval(() => {
+      // 1. Update NOC Telemetry Chart
       setEvolutionData(prev => {
         if (!prev.length) return generateHighDensityData();
         const newData = [...prev.slice(1)];
@@ -71,11 +85,22 @@ const DashboardHome: React.FC<DashboardHomeProps> = ({
         });
         return newData;
       });
+
+      // 2. Update Ingress/Drop Metrics
       setLiveMetrics({
         ingress: +(14.5 + Math.random() * 0.8).toFixed(1),
         drop: +(0.01 + Math.random() * 0.02).toFixed(3)
       });
-    }, 2000);
+
+      // 3. Fluctuated Primary Stats for "Live" effect
+      setDisplayStats(prev => ({
+        ...prev,
+        totalIoCs: prev.totalIoCs + (Math.random() > 0.4 ? Math.floor(Math.random() * 3) : 0),
+        activeThreats: prev.activeThreats + (Math.random() > 0.85 ? (Math.random() > 0.5 ? 1 : -1) : 0),
+        alerts24h: prev.alerts24h + (Math.random() > 0.92 ? 1 : 0)
+      }));
+    }, 3000);
+
     return () => clearInterval(interval);
   }, []);
 
@@ -83,10 +108,31 @@ const DashboardHome: React.FC<DashboardHomeProps> = ({
     <div className="space-y-6 animate-in fade-in duration-700">
       {/* Primary Metrics Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Total Indicators" value={stats.totalIoCs.toLocaleString()} change="+12%" icon={<Shield className="w-5 h-5 text-blue-400" />} />
-        <StatCard title="Active Adversaries" value={stats.activeThreats.toLocaleString()} change="-4%" negative icon={<AlertTriangle className="w-5 h-5 text-red-400" />} />
-        <StatCard title="Intelligence Feeds" value={stats.activeFeeds.toString()} change="Optimal" icon={<Zap className="w-5 h-5 text-yellow-400" />} />
-        <StatCard title="Daily Alerts" value={stats.alerts24h.toString()} change="+18%" icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} />
+        <StatCard 
+          title="Total Indicators" 
+          value={displayStats.totalIoCs.toLocaleString()} 
+          change="+12%" 
+          icon={<Shield className="w-5 h-5 text-blue-400" />} 
+        />
+        <StatCard 
+          title="Active Adversaries" 
+          value={displayStats.activeThreats.toLocaleString()} 
+          change="-4%" 
+          negative 
+          icon={<AlertTriangle className="w-5 h-5 text-red-400" />} 
+        />
+        <StatCard 
+          title="Intelligence Feeds" 
+          value={displayStats.activeFeeds.toString()} 
+          change="Optimal" 
+          icon={<Zap className="w-5 h-5 text-yellow-400" />} 
+        />
+        <StatCard 
+          title="Daily Alerts" 
+          value={displayStats.alerts24h.toString()} 
+          change="+18%" 
+          icon={<TrendingUp className="w-5 h-5 text-emerald-400" />} 
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -272,18 +318,39 @@ const StatCard: React.FC<{
   change: string; 
   icon: React.ReactNode; 
   negative?: boolean; 
-}> = ({ title, value, change, icon, negative }) => (
-  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-sm hover:border-slate-700 transition-all group">
-    <div className="flex justify-between items-start mb-4">
-      <div className="p-2.5 bg-slate-800 rounded-xl border border-slate-700 group-hover:bg-slate-700 transition-colors">{icon}</div>
-      <span className={`text-[10px] font-black uppercase tracking-tighter ${negative ? 'text-red-400' : 'text-emerald-400'}`}>{change}</span>
+}> = ({ title, value, change, icon, negative }) => {
+  const [ping, setPing] = useState(false);
+  const prevValue = useRef(value);
+
+  useEffect(() => {
+    if (prevValue.current !== value) {
+      setPing(true);
+      const timer = setTimeout(() => setPing(false), 800);
+      prevValue.current = value;
+      return () => clearTimeout(timer);
+    }
+  }, [value]);
+
+  return (
+    <div className={`bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-sm transition-all duration-300 group ${ping ? 'border-blue-500/40 bg-slate-800/50' : 'hover:border-slate-700'}`}>
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-2.5 bg-slate-800 rounded-xl border border-slate-700 group-hover:bg-slate-700 transition-colors ${ping ? 'border-blue-400' : ''}`}>
+          {icon}
+        </div>
+        <div className="flex flex-col items-end">
+          <span className={`text-[10px] font-black uppercase tracking-tighter ${negative ? 'text-red-400' : 'text-emerald-400'}`}>{change}</span>
+          {ping && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping mt-1" />}
+        </div>
+      </div>
+      <div>
+        <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">{title}</p>
+        <h4 className={`text-2xl font-black font-mono transition-all duration-500 ${ping ? 'text-blue-400 scale-[1.02]' : 'text-white'}`}>
+          {value}
+        </h4>
+      </div>
     </div>
-    <div>
-      <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest mb-1">{title}</p>
-      <h4 className="text-2xl font-black text-white font-mono">{value}</h4>
-    </div>
-  </div>
-);
+  );
+};
 
 const StatusWidget: React.FC<{ label: string; value: string; color: string }> = ({ label, value, color }) => (
   <div className="flex items-center justify-between p-3 bg-slate-950/50 border border-slate-800 rounded-xl">
