@@ -1,0 +1,8 @@
+{
+  "name": "Sentinel - Threat Intelligence Platform",
+  "description": "A comprehensive cybersecurity dashboard for aggregating, analyzing, and visualizing global threat intelligence data using Gemini AI for IoC enrichment and anomaly detection.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ]
+}
