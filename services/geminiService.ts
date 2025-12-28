@@ -1,7 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-// Fix: Use process.env.API_KEY directly for initialization as per coding guidelines
 const getAIClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
@@ -23,10 +22,13 @@ export const enrichIoC = async (iocValue: string, iocType: string) => {
       },
     });
     
-    return response.text;
+    return {
+      text: response.text,
+      sources: response.candidates?.[0]?.groundingMetadata?.groundingChunks || []
+    };
   } catch (error) {
     console.error("Gemini Enrichment Error:", error);
-    return "Failed to enrich IoC data at this time.";
+    return { text: "Failed to enrich IoC data at this time.", sources: [] };
   }
 };
 
@@ -35,8 +37,15 @@ export const suggestFeeds = async (threatLandscape: string) => {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Based on the current threat landscape: "${threatLandscape}", suggest 3 high-quality Open Source Intelligence (OSINT) or commercial threat intelligence feeds. 
-      Include the Name, URL, Type (TAXII, RSS, or API), and why it is relevant for current threats.`,
+      contents: `Analyze the following threat intelligence focus area: "${threatLandscape}". 
+
+      Based on this specific landscape, suggest exactly 3 high-fidelity threat intelligence sources (OSINT or commercial). 
+      For each source, provide:
+      1. A deep-dive justification explaining exactly how its data helps mitigate the specific threats mentioned in the landscape.
+      2. 3-4 recommended tags for organizing this feed's data.
+      3. The primary integration protocol (TAXII, RSS, or API).
+
+      Focus on feeds that offer STIX/TAXII or REST API integrations.`,
       config: {
         responseMimeType: "application/json",
         thinkingConfig: { thinkingBudget: 0 },
@@ -45,12 +54,17 @@ export const suggestFeeds = async (threatLandscape: string) => {
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING },
-              url: { type: Type.STRING },
-              type: { type: Type.STRING },
-              reason: { type: Type.STRING }
+              name: { type: Type.STRING, description: "The name of the intelligence provider." },
+              url: { type: Type.STRING, description: "The official integration or website URL." },
+              type: { type: Type.STRING, description: "The primary protocol used (TAXII, RSS, API)." },
+              reason: { type: Type.STRING, description: "A detailed, technical explanation of relevance to the provided landscape." },
+              tags: { 
+                type: Type.ARRAY, 
+                items: { type: Type.STRING },
+                description: "Recommended labels for this feed's data."
+              }
             },
-            required: ["name", "url", "type", "reason"]
+            required: ["name", "url", "type", "reason", "tags"]
           }
         }
       }
@@ -131,7 +145,7 @@ export const analyzeVisualForensics = async (base64Image: string, mimeType: stri
             },
           },
           {
-            text: "Analyze this image for cybersecurity threats. Identify any suspicious code, C2 domains, shell commands, or phishing indicators visible in the screenshot. Provide a risk score from 1-10."
+            text: "Identify all Indicator of Compromise (IoCs) in this image. Focus on IP addresses, domain names, file paths, shell commands, or suspicious process names. Provide a summary suitable for a threat hunter."
           }
         ],
       },
@@ -170,10 +184,14 @@ export const suggestHuntQueries = async (target: string) => {
   const ai = getAIClient();
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Generate 3 professional Kusto Query Language (KQL) and 3 SQL queries for hunting ${target} in enterprise SIEM logs. 
-      Format the output clearly with explanations for each query.`,
+      model: "gemini-3-pro-preview",
+      contents: `As a top-tier security researcher, perform a live search for the latest TTPs and hunting queries related to: "${target}". 
+      
+      Your goal is to provide high-fidelity hunting patterns (KQL and SQL) based on current real-world observations.
+      
+      Format as a JSON array of objects with 'language', 'query', and 'description'.`,
       config: {
+        tools: [{ googleSearch: {} }],
         responseMimeType: "application/json",
         thinkingConfig: { thinkingBudget: 0 },
         responseSchema: {
@@ -202,15 +220,7 @@ export const getMitreTechniqueDetails = async (techniqueId: string, techniqueNam
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Provide a detailed cybersecurity defense briefing for the MITRE ATT&CK technique: ${techniqueName} (${techniqueId}).
-      
-      Your response must include:
-      1. Technical Description: A deep-dive into how this technique is executed by adversaries.
-      2. Data Sources: Specific log sources and telemetry needed to detect this behavior.
-      3. Mitigation Strategies: Engineering and policy controls to prevent or reduce the impact.
-      4. Detection Logic: High-level logic or specific SIGMA/KQL patterns to alert on this activity.
-      
-      Format the output with clear professional headers and structured bullet points.`,
+      contents: `Provide a detailed cybersecurity defense briefing for the MITRE ATT&CK technique: ${techniqueName} (${techniqueId}).`,
       config: {
         thinkingConfig: { thinkingBudget: 0 }
       }

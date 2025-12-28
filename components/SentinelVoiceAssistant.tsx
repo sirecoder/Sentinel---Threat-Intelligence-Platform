@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Mic, MicOff, Waves, X, Loader2, Bot } from 'lucide-react';
 import { GoogleGenAI, Modality } from '@google/genai';
 
-// Fix: Manual implementation of audio encoding/decoding as required by Live API guidelines
+// Manual implementation of audio encoding/decoding as required by Live API guidelines
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -47,21 +47,25 @@ const SentinelVoiceAssistant: React.FC = () => {
   const [isConnecting, setIsConnecting] = useState(false);
   
   const audioContextRef = useRef<AudioContext | null>(null);
+  const inputContextRef = useRef<AudioContext | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionRef = useRef<any>(null);
 
   const startSession = async () => {
     setIsConnecting(true);
-    // Fix: Create instance with process.env.API_KEY directly
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     
     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    inputContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+    
     const outputContext = audioContextRef.current;
-    const inputContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+    const inputContext = inputContextRef.current;
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
       
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
@@ -87,7 +91,6 @@ const SentinelVoiceAssistant: React.FC = () => {
               for (let i = 0; i < l; i++) {
                 int16[i] = inputData[i] * 32768;
               }
-              // Fix: Use manual encode function for streaming PCM data
               const pcmData = encode(new Uint8Array(int16.buffer));
               
               sessionPromise.then(session => {
@@ -102,8 +105,7 @@ const SentinelVoiceAssistant: React.FC = () => {
           },
           onmessage: async (message) => {
             const base64EncodedAudioString = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64EncodedAudioString) {
-              // Fix: Use manual decode and decodeAudioData functions to process raw PCM stream
+            if (base64EncodedAudioString && outputContext.state !== 'closed') {
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputContext.currentTime);
               const audioBuffer = await decodeAudioData(
                 decode(base64EncodedAudioString),
@@ -126,13 +128,15 @@ const SentinelVoiceAssistant: React.FC = () => {
             }
 
             if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
+              sourcesRef.current.forEach(s => {
+                try { s.stop(); } catch(e) {}
+              });
               sourcesRef.current.clear();
               nextStartTimeRef.current = 0;
             }
           },
           onerror: (e) => console.error("Voice Assistant Error:", e),
-          onclose: () => setIsActive(false),
+          onclose: () => stopSession(),
         },
       });
       
@@ -145,9 +149,28 @@ const SentinelVoiceAssistant: React.FC = () => {
 
   const stopSession = () => {
     if (sessionRef.current) {
-      sessionRef.current.close();
+      try { sessionRef.current.close(); } catch(e) {}
       sessionRef.current = null;
     }
+    
+    // Explicit hardware cleanup
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    if (inputContextRef.current && inputContextRef.current.state !== 'closed') {
+      inputContextRef.current.close();
+      inputContextRef.current = null;
+    }
+
+    sourcesRef.current.clear();
+    nextStartTimeRef.current = 0;
     setIsActive(false);
   };
 

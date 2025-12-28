@@ -1,5 +1,16 @@
 
-export type IoCType = 'IP' | 'Domain' | 'Hash' | 'URL' | 'Email';
+export type IoCType = 'IP' | 'Domain' | 'Hash' | 'URL' | 'Email' | 'SHA256' | 'MD5' | 'SHA1' | 'YARA' | 'Snort' | 'RegistryKey' | 'FilePath';
+
+export type UserRole = 'Tier-1 (Viewer)' | 'Tier-2 (Analyst)' | 'Tier-3 (Admin)';
+
+export interface User {
+  id: string;
+  name: string;
+  role: UserRole;
+  email: string;
+  avatar?: string;
+  lastLogin: string;
+}
 
 export interface IoCRecord {
   id: string;
@@ -11,6 +22,14 @@ export interface IoCRecord {
   tags: string[];
   status: 'Active' | 'Expired' | 'Whitelisted';
   description?: string;
+}
+
+export interface SavedHunt {
+  id: string;
+  name: string;
+  query: string;
+  language: string;
+  timestamp: string;
 }
 
 export interface ThreatFeed {
@@ -59,4 +78,22 @@ export interface ThreatCampaign {
   severity: 'Low' | 'Medium' | 'High' | 'Critical';
   status: 'Active' | 'Contained' | 'Monitored';
   events: CampaignEvent[];
+}
+
+export interface MitigationPlaybook {
+  id: string;
+  name: string;
+  description: string;
+  target: 'Network' | 'Endpoint' | 'Identity' | 'Cloud';
+  severity: 'Standard' | 'Elevated' | 'Critical';
+  steps: string[];
+}
+
+export interface MitigationTask {
+  id: string;
+  playbookId: string;
+  status: 'Pending' | 'Executing' | 'Completed' | 'Failed';
+  initiatedBy: string;
+  timestamp: string;
+  logs: string[];
 }

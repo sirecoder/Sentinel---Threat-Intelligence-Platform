@@ -1,55 +1,41 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, 
-  Terminal, 
-  Play, 
-  Save, 
-  Copy, 
-  Zap, 
-  ChevronRight, 
-  Info,
-  History,
-  CheckCircle2,
-  Clock,
-  Sparkles,
-  Loader2,
-  X,
-  FileText,
-  ShieldAlert,
-  ArrowLeft,
-  Filter,
-  Download
+  Search, Play, Save, Zap, Loader2, Sparkles, ArrowLeft, Lock, Bookmark, History, X, 
+  BarChart3, Activity, Terminal, Shield, Filter, ChevronRight, Share2, Info, Camera,
+  Upload, Image as ImageIcon, Binary, Cpu, RotateCcw, Copy, ExternalLink, Code,
+  User, Trash2, Clock
 } from 'lucide-react';
-import { suggestHuntQueries } from '../services/geminiService';
-
-interface HuntLog {
-  id: string;
-  timestamp: string;
-  host: string;
-  user: string;
-  action: string;
-  risk: 'Low' | 'Medium' | 'High' | 'Critical';
-  details: string;
-}
+import { suggestHuntQueries, analyzeVisualForensics } from '../services/geminiService';
+import { UserRole, SavedHunt } from '../types';
+import { ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 interface ThreatHunterProps {
   initialTarget?: string | null;
   onHuntStart?: () => void;
+  userRole: UserRole;
+  savedHunts: SavedHunt[];
+  onSaveHunt: (hunt: SavedHunt) => void;
+  onDeleteSavedHunt: (id: string) => void;
 }
 
-const ThreatHunter: React.FC<ThreatHunterProps> = ({ initialTarget, onHuntStart }) => {
+const ThreatHunter: React.FC<ThreatHunterProps> = ({ 
+  initialTarget, onHuntStart, userRole, savedHunts, onSaveHunt, onDeleteSavedHunt 
+}) => {
   const [huntingTarget, setHuntingTarget] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [queries, setQueries] = useState<any[]>([]);
   const [executingIdx, setExecutingIdx] = useState<number | null>(null);
-  const [huntResults, setHuntResults] = useState<HuntLog[] | null>(null);
-  const [activeQuery, setActiveQuery] = useState<any | null>(null);
+  const [huntResults, setHuntResults] = useState<any[] | null>(null);
+  const [showSavedMenu, setShowSavedMenu] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const userLevel = userRole.includes('Tier-3') ? 3 : userRole.includes('Tier-2') ? 2 : 1;
 
   useEffect(() => {
     if (initialTarget) {
       setHuntingTarget(initialTarget);
-      // Automatically trigger generation for a smoother jump experience
       handleGenerate(initialTarget);
       if (onHuntStart) onHuntStart();
     }
@@ -59,334 +45,211 @@ const ThreatHunter: React.FC<ThreatHunterProps> = ({ initialTarget, onHuntStart 
     const target = targetOverride || huntingTarget;
     if (!target) return;
     setIsGenerating(true);
+    setHuntResults(null);
     const results = await suggestHuntQueries(target);
     setQueries(results);
     setIsGenerating(false);
   };
 
-  const generateMockLogs = (query: any): HuntLog[] => {
-    const hosts = ['SRV-SQL-01', 'WORKSTATION-12', 'DC-PROD-01', 'GATEWAY-APP', 'HR-LAPTOP-04'];
-    const users = ['admin', 'j.doe', 'system', 'service_account', 'b.smith'];
-    const actions = ['Process Create', 'Network Connect', 'Registry Modify', 'File Write', 'Login Success'];
-    
-    return Array.from({ length: 8 }).map((_, i) => ({
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date(Date.now() - Math.random() * 10000000).toISOString(),
-      host: hosts[Math.floor(Math.random() * hosts.length)],
-      user: users[Math.floor(Math.random() * users.length)],
-      action: actions[Math.floor(Math.random() * actions.length)],
-      risk: i === 0 ? 'High' : (Math.random() > 0.7 ? 'Medium' : 'Low'),
-      details: `Detected behavior matching ${query.language} logic: ${query.description.substring(0, 50).replace(/,/g, '')}...`
-    }));
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsAnalyzingImage(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const analysis = await analyzeVisualForensics(base64, file.type);
+      setHuntingTarget(analysis);
+      setIsAnalyzingImage(false);
+    };
+    reader.readAsDataURL(file);
   };
 
   const handleExecute = (idx: number) => {
+    if (userLevel < 2) return;
     setExecutingIdx(idx);
-    setActiveQuery(queries[idx]);
-    
-    // Simulate query execution time
     setTimeout(() => {
       setExecutingIdx(null);
-      setHuntResults(generateMockLogs(queries[idx]));
+      setHuntResults(Array.from({length: 8}).map((_, i) => ({ 
+        id: i, 
+        host: `NODE-0${Math.floor(Math.random() * 999)}`, 
+        user: ["svc_admin", "k.mitnick", "root", "j.doe"][Math.floor(Math.random() * 4)],
+        details: "Unusual process injection matching current TTP observed. Signal drift exceeds threshold.",
+        severity: Math.random() > 0.7 ? "Critical" : "High",
+        timestamp: new Date().toISOString(),
+        score: (0.7 + Math.random() * 0.3).toFixed(2),
+        sparkData: Array.from({length: 12}).map(() => ({ v: Math.random() * 10 }))
+      })));
     }, 2500);
   };
 
-  const handleDownloadCSV = () => {
-    if (!huntResults) return;
-
-    const headers = ['ID', 'Timestamp', 'Host', 'User', 'Action', 'Risk', 'Details'];
-    const rows = huntResults.map(log => [
-      log.id,
-      log.timestamp,
-      log.host,
-      log.user,
-      log.action,
-      log.risk,
-      `"${log.details.replace(/"/g, '""')}"`
-    ]);
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `sentinel_hunt_${huntingTarget.replace(/\s+/g, '_').toLowerCase()}_${new Date().getTime()}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleSaveToLibrary = (q: any) => {
+    onSaveHunt({
+      id: Math.random().toString(36).substr(2, 9),
+      name: huntingTarget || 'Custom Hunt',
+      query: q.query,
+      language: q.language,
+      timestamp: new Date().toISOString()
+    });
   };
 
-  const resetHunt = () => {
-    setHuntResults(null);
-    setActiveQuery(null);
+  const loadSavedHunt = (hunt: SavedHunt) => {
+    setHuntingTarget(hunt.name);
+    setQueries([{
+      language: hunt.language,
+      query: hunt.query,
+      description: `Loaded from saved hunt: ${hunt.name}`
+    }]);
+    setShowSavedMenu(false);
   };
-
-  if (huntResults && activeQuery) {
-    return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={resetHunt}
-              className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white rounded-lg transition-colors border border-slate-700"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-                Hunt Results
-              </h1>
-              <p className="text-slate-400 text-sm">Target: <span className="text-blue-400 font-medium">{huntingTarget}</span> • {activeQuery.language} Execution</p>
-            </div>
-          </div>
-          <div className="flex gap-3">
-            <button 
-              onClick={handleDownloadCSV}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:text-white transition-colors text-sm font-medium border border-slate-700"
-            >
-              <Download className="w-4 h-4" />
-              Download CSV
-            </button>
-            <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors text-sm font-medium shadow-lg shadow-blue-500/20">
-              <Save className="w-4 h-4" />
-              Save Evidence
-            </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          <div className="lg:col-span-1 space-y-6">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4 shadow-xl">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Query Summary</h3>
-              <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 font-mono text-[10px] text-blue-300 overflow-x-auto">
-                <code>{activeQuery.query}</code>
-              </div>
-              <div className="flex justify-between items-center pt-2">
-                <span className="text-xs text-slate-400">Total Matches</span>
-                <span className="text-lg font-bold text-white font-mono">{huntResults.length}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-400">Execution Time</span>
-                <span className="text-xs font-medium text-emerald-400 font-mono">2.48s</span>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl">
-              <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-4">Risk Distribution</h3>
-              <div className="space-y-3">
-                {['High', 'Medium', 'Low'].map(level => {
-                  const count = huntResults.filter(r => r.risk === level).length;
-                  const percentage = (count / huntResults.length) * 100;
-                  return (
-                    <div key={level} className="space-y-1">
-                      <div className="flex justify-between text-[10px] font-bold">
-                        <span className={level === 'High' ? 'text-red-400' : level === 'Medium' ? 'text-orange-400' : 'text-blue-400'}>{level}</span>
-                        <span className="text-slate-500">{count}</span>
-                      </div>
-                      <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full ${level === 'High' ? 'bg-red-500' : level === 'Medium' ? 'bg-orange-500' : 'bg-blue-500'}`} 
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-3 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl flex flex-col min-h-[500px]">
-            <div className="p-4 border-b border-slate-800 bg-slate-800/20 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-slate-500" />
-                <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Matching Log Entries</span>
-              </div>
-              <button className="text-slate-500 hover:text-white">
-                <Filter className="w-4 h-4" />
-              </button>
-            </div>
-            
-            <div className="overflow-x-auto flex-1">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/50">
-                    <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Timestamp</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Host / User</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</th>
-                    <th className="px-4 py-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-right">Risk</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800 font-mono text-[11px]">
-                  {huntResults.map((log) => (
-                    <tr key={log.id} className="hover:bg-slate-800/40 transition-colors group cursor-pointer">
-                      <td className="px-4 py-3 text-slate-400 whitespace-nowrap">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}.{log.id.substring(0, 3)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-col">
-                          <span className="text-slate-200 font-bold">{log.host}</span>
-                          <span className="text-slate-500 text-[10px]">{log.user}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-blue-400 group-hover:text-blue-300">
-                        {log.action}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          log.risk === 'High' ? 'bg-red-500/10 text-red-500 border border-red-500/20' : 
-                          log.risk === 'Medium' ? 'bg-orange-500/10 text-orange-500 border border-orange-500/20' : 
-                          'bg-blue-500/10 text-blue-500 border border-blue-500/20'
-                        }`}>
-                          {log.risk}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="p-4 bg-slate-950 border-t border-slate-800">
-              <div className="flex items-center gap-3 text-xs text-slate-500 italic">
-                <Info className="w-4 h-4 shrink-0" />
-                Showing top matches from the last 24 hours based on the applied KQL/SQL logic.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-            <Search className="w-7 h-7 text-blue-500" />
-            AI Threat Hunting
-          </h1>
-          <p className="text-slate-400">Proactively identify malicious activity using advanced query generation.</p>
-        </div>
-        <div className="flex gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:text-white transition-colors text-sm font-medium border border-slate-700">
-            <History className="w-4 h-4" />
-            Hunt History
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-slate-300 rounded-lg hover:text-white transition-colors text-sm font-medium border border-slate-700">
-            <Save className="w-4 h-4" />
-            Saved Queries
-          </button>
-        </div>
-      </div>
+    <div className="flex flex-col gap-6 min-h-[calc(100vh-140px)] animate-in fade-in duration-500">
+      
+      {/* Search & Ingest Hub */}
+      {!huntResults && (
+        <div className="space-y-6">
+          <div className="bg-[#020617] border border-slate-800 rounded-3xl p-8 md:p-12 shadow-2xl relative overflow-hidden">
+            <div className="absolute inset-0 opacity-[0.03] bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] pointer-events-none" />
+            
+            <div className="max-w-4xl mx-auto space-y-8 relative z-10">
+              <div className="text-center space-y-2">
+                <h1 className="text-3xl md:text-4xl font-black text-white tracking-tighter uppercase">Tactical Hunt Engine</h1>
+                <p className="text-slate-500 text-xs font-black uppercase tracking-[0.3em]">AI-Grounding Hub: Online</p>
+              </div>
 
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-600/5 blur-3xl -z-10 rounded-full translate-x-32 -translate-y-32" />
-        
-        <div className="max-w-3xl mx-auto space-y-8">
-          <div className="text-center space-y-2">
-            <h2 className="text-xl font-semibold text-white">What are you hunting for?</h2>
-            <p className="text-slate-400 text-sm">Describe the threat behavior, malware family, or attack vector you want to detect.</p>
-          </div>
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="relative flex-1 group">
+                  <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-blue-500 transition-colors" />
+                  <input 
+                    type="text" 
+                    placeholder="Enter TTP, CVE, or Actor handle..."
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-2xl py-5 pl-14 pr-6 text-white text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none transition-all shadow-xl"
+                    value={huntingTarget}
+                    onChange={(e) => setHuntingTarget(e.target.value)}
+                  />
+                </div>
+                
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setShowSavedMenu(!showSavedMenu)}
+                    className={`p-5 bg-slate-900 border border-slate-800 rounded-2xl transition-all ${showSavedMenu ? 'text-blue-500 border-blue-500/50' : 'text-slate-400 hover:text-white'}`}
+                    title="Saved Hunts"
+                  >
+                    <Bookmark className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isAnalyzingImage}
+                    className="p-5 bg-slate-900 border border-slate-800 rounded-2xl text-slate-400 hover:text-white hover:border-blue-500/50 transition-all group"
+                    title="Visual Ingest"
+                  >
+                    {isAnalyzingImage ? <Loader2 className="w-5 h-5 animate-spin" /> : <Camera className="w-5 h-5" />}
+                    <input type="file" ref={fileInputRef} onChange={handleImageUpload} className="hidden" accept="image/*" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => handleGenerate()} 
+                    disabled={isGenerating || !huntingTarget}
+                    className="bg-blue-600 hover:bg-blue-500 text-white px-10 rounded-2xl font-black uppercase tracking-widest text-[11px] shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+                  >
+                    {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-4 h-4" /> Orchestrate</>}
+                  </button>
+                </div>
+              </div>
 
-          <div className="relative group">
-            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-cyan-500 rounded-2xl blur opacity-25 group-focus-within:opacity-40 transition-opacity" />
-            <div className="relative flex gap-2">
-              <input 
-                type="text"
-                placeholder="e.g., 'Lateral movement using RDP' or 'Cobalt Strike beaconing behavior'"
-                className={`flex-1 bg-slate-950 border border-slate-800 rounded-xl px-6 py-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg shadow-inner ${
-                  initialTarget ? 'ring-2 ring-blue-500/50' : ''
-                }`}
-                value={huntingTarget}
-                onChange={(e) => setHuntingTarget(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
-              />
-              <button 
-                onClick={() => handleGenerate()}
-                disabled={isGenerating || !huntingTarget}
-                className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white px-8 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center gap-3"
-              >
-                {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-                Generate Hunt
-              </button>
+              {/* Saved Hunts Dropdown */}
+              {showSavedMenu && (
+                <div className="absolute top-full right-0 mt-4 w-96 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2">
+                  <div className="p-4 border-b border-slate-800 bg-slate-800/20 flex justify-between items-center">
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">Saved Hunt Library</span>
+                    <button onClick={() => setShowSavedMenu(false)} className="text-slate-500 hover:text-white"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-800 scrollbar-thin scrollbar-thumb-slate-800">
+                    {savedHunts.length === 0 ? (
+                      <div className="p-12 text-center text-slate-600">
+                        <Bookmark className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                        <p className="text-[10px] font-black uppercase">No saved signatures found.</p>
+                      </div>
+                    ) : (
+                      savedHunts.map(hunt => (
+                        <div key={hunt.id} className="p-4 hover:bg-slate-800/50 group flex items-center justify-between transition-colors">
+                           <button onClick={() => loadSavedHunt(hunt)} className="flex-1 text-left min-w-0">
+                             <h4 className="text-xs font-bold text-white truncate">{hunt.name}</h4>
+                             <div className="flex items-center gap-2 mt-1">
+                               <span className="text-[8px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded uppercase font-black">{hunt.language}</span>
+                               <span className="text-[8px] text-slate-500 font-mono">{new Date(hunt.timestamp).toLocaleDateString()}</span>
+                             </div>
+                           </button>
+                           <button 
+                            onClick={(e) => { e.stopPropagation(); onDeleteSavedHunt(hunt.id); }}
+                            className="p-2 text-slate-700 hover:text-red-500 transition-colors"
+                           >
+                             <Trash2 className="w-4 h-4" />
+                           </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-wrap justify-center gap-3">
-            {['Process injection', 'Persistence via Scheduled Tasks', 'Data Exfiltration', 'Suspicious PowerShell'].map(tag => (
-              <button 
-                key={tag}
-                onClick={() => setHuntingTarget(tag)}
-                className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-white rounded-full text-xs font-medium border border-slate-700/50 transition-colors"
-              >
-                {tag}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {queries.length > 0 && (
-        <div className="grid grid-cols-1 gap-6 animate-in slide-in-from-bottom-6 duration-500">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
-              <Terminal className="w-5 h-5 text-blue-500" />
-              Generated Queries
-            </h3>
-            <button 
-              onClick={() => setQueries([])}
-              className="text-xs text-slate-500 hover:text-white flex items-center gap-1"
-            >
-              <X className="w-3 h-3" /> Clear
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/* Query Results IDE View */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {queries.map((q, idx) => (
-              <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col hover:border-blue-500/50 transition-all group shadow-lg">
-                <div className="p-4 border-b border-slate-800 bg-slate-800/40 flex justify-between items-center">
+              <div key={idx} className="bg-slate-900 border border-slate-800 rounded-3xl flex flex-col group overflow-hidden shadow-xl animate-in slide-in-from-bottom-6 duration-500" style={{ animationDelay: `${idx * 150}ms` }}>
+                <div className="p-4 bg-slate-800/40 border-b border-slate-800 flex justify-between items-center">
                   <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 bg-blue-600/20 text-blue-400 text-[10px] font-bold rounded uppercase tracking-wider">{q.language}</span>
-                    <h4 className="text-sm font-semibold text-white">Scenario {idx + 1}</h4>
+                    <div className="p-1.5 bg-blue-600/10 rounded-lg"><Terminal className="w-3.5 h-3.5 text-blue-400" /></div>
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest">{q.language} Signal</span>
                   </div>
-                  <div className="flex gap-2">
-                    <button className="p-1.5 hover:bg-slate-700 rounded text-slate-400 hover:text-white transition-colors">
-                      <Copy className="w-4 h-4" />
-                    </button>
+                  <div className="flex gap-1">
+                    <button onClick={() => handleSaveToLibrary(q)} className="p-1.5 text-slate-600 hover:text-emerald-400" title="Save to Library"><Bookmark className="w-3 h-3" /></button>
+                    <button className="p-1.5 text-slate-600 hover:text-white"><Copy className="w-3 h-3" /></button>
+                    <button className="p-1.5 text-slate-600 hover:text-blue-400"><RotateCcw className="w-3 h-3" /></button>
                   </div>
                 </div>
-                <div className="p-4 flex-1">
-                  <div className="mb-4 text-xs text-slate-400 leading-relaxed italic">
+                
+                <div className="p-6 flex-1 space-y-4">
+                  <p className="text-[11px] text-slate-400 font-medium leading-relaxed bg-slate-950/50 p-3 rounded-xl border border-slate-800/50">
+                    <Info className="w-3 h-3 inline mr-2 text-blue-500" />
                     {q.description}
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 font-mono text-xs text-blue-300 overflow-x-auto h-[120px]">
-                    <code>{q.query}</code>
+                  </p>
+                  
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner group-hover:border-blue-500/30 transition-colors">
+                    <div className="flex border-b border-slate-800 bg-slate-900/50 px-3 py-1">
+                       <div className="flex gap-1">
+                         <div className="w-2 h-2 rounded-full bg-red-500/30" />
+                         <div className="w-2 h-2 rounded-full bg-yellow-500/30" />
+                         <div className="w-2 h-2 rounded-full bg-green-500/30" />
+                       </div>
+                    </div>
+                    <div className="p-4 h-40 overflow-auto font-mono text-[10px] leading-relaxed scrollbar-thin scrollbar-thumb-slate-800 flex">
+                      <div className="pr-4 border-r border-slate-800 text-slate-700 select-none text-right">
+                        {q.query.split('\n').map((_, i) => <div key={i}>{i+1}</div>)}
+                      </div>
+                      <code className="pl-4 text-blue-300 whitespace-pre break-all">{q.query}</code>
+                    </div>
                   </div>
                 </div>
-                <div className="p-3 bg-slate-800/30 border-t border-slate-800">
-                  <button 
-                    onClick={() => handleExecute(idx)}
-                    disabled={executingIdx !== null}
-                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-emerald-500/10"
-                  >
-                    {executingIdx === idx ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Running...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4 fill-current" />
-                        Execute Hunt
-                      </>
-                    )}
-                  </button>
+
+                <div className="p-5 border-t border-slate-800 bg-slate-800/20">
+                  {userLevel >= 2 ? (
+                    <button 
+                      onClick={() => handleExecute(idx)} 
+                      disabled={executingIdx !== null}
+                      className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3.5 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-lg active:scale-95 disabled:opacity-50"
+                    >
+                      {executingIdx === idx ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Play className="w-4 h-4 fill-current" /> Initialize Search</>}
+                    </button>
+                  ) : (
+                    <div className="flex items-center justify-center gap-2 text-slate-700 bg-slate-900 py-3 rounded-xl border border-slate-800">
+                      <Lock className="w-4 h-4" /> <span className="text-[9px] font-black uppercase">Tier-2 Analyst Required</span>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -394,14 +257,80 @@ const ThreatHunter: React.FC<ThreatHunterProps> = ({ initialTarget, onHuntStart 
         </div>
       )}
 
-      {queries.length === 0 && !isGenerating && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center space-y-4">
-          <div className="mx-auto w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center text-slate-600">
-            <Zap className="w-8 h-8" />
+      {/* Post-Hunt Tactical Results */}
+      {huntResults && (
+        <div className="space-y-6 animate-in zoom-in-95 duration-500">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900 border border-slate-800 p-5 rounded-3xl shadow-xl">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-blue-600/10 border border-blue-500/20 rounded-2xl">
+                <Shield className="w-6 h-6 text-blue-500" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-white uppercase tracking-tight">Detection Manifest</h2>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Target: {huntingTarget}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 w-full md:w-auto">
+               <button 
+                onClick={() => setHuntResults(null)}
+                className="flex-1 md:flex-none px-6 py-2.5 bg-slate-800 text-slate-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+               >
+                 <ArrowLeft className="w-4 h-4 inline mr-2" /> New Hunt
+               </button>
+               <button className="flex-1 md:flex-none px-6 py-2.5 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-blue-500/20">
+                 Export STIX 2.1
+               </button>
+            </div>
           </div>
-          <div className="max-w-md mx-auto">
-            <h3 className="text-lg font-semibold text-white">Ready to hunt?</h3>
-            <p className="text-slate-400 text-sm">Enter a target above to leverage Gemini AI for generating specialized detection queries based on real-world threat intelligence.</p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {huntResults.map((r) => (
+              <div key={r.id} className="bg-slate-900 border border-slate-800 p-6 rounded-3xl shadow-xl hover:border-blue-500/30 transition-all group relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-4 opacity-[0.05] pointer-events-none">
+                  <Binary className="w-16 h-16" />
+                </div>
+                
+                <div className="flex justify-between items-start mb-4">
+                   <div className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
+                     r.severity === 'Critical' ? 'bg-red-500/10 text-red-500 border-red-500/30' : 'bg-orange-500/10 text-orange-400 border-orange-500/30'
+                   }`}>
+                     {r.severity} LEVEL
+                   </div>
+                   <div className="text-[10px] font-mono font-black text-blue-500 bg-blue-500/10 px-2 py-0.5 rounded-full">
+                     SCORE: {r.score}
+                   </div>
+                </div>
+
+                <div className="space-y-1 mb-4">
+                  <h3 className="text-lg font-black text-white font-mono">{r.host}</h3>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-500 font-black uppercase tracking-widest">
+                    <User className="w-3 h-3 text-blue-500" />
+                    UID: {r.user}
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400 leading-relaxed mb-6 line-clamp-3">
+                  {r.details}
+                </p>
+                
+                <div className="h-12 w-full mb-6 opacity-30">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={r.sparkData}>
+                      <Area type="monotone" dataKey="v" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.2} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2">
+                   <button className="py-2 bg-slate-950 border border-slate-800 rounded-xl text-[9px] font-black uppercase text-slate-500 hover:text-white transition-all flex items-center justify-center gap-2">
+                     <History className="w-3 h-3" /> Timeline
+                   </button>
+                   <button className="py-2 bg-blue-600/10 border border-blue-500/20 rounded-xl text-[9px] font-black uppercase text-blue-400 hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2">
+                     <Zap className="w-3 h-3" /> Pivot
+                   </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
