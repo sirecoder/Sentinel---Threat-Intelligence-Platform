@@ -19,6 +19,7 @@ export const enrichIoC = async (iocValue: string, iocType: string) => {
       config: {
         tools: [{ googleSearch: {} }],
         temperature: 0.2,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
     
@@ -38,6 +39,7 @@ export const suggestFeeds = async (threatLandscape: string) => {
       Include the Name, URL, Type (TAXII, RSS, or API), and why it is relevant for current threats.`,
       config: {
         responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 0 },
         responseSchema: {
           type: Type.ARRAY,
           items: {
@@ -53,7 +55,7 @@ export const suggestFeeds = async (threatLandscape: string) => {
         }
       }
     });
-    return JSON.parse(response.text);
+    return JSON.parse(response.text || "[]");
   } catch (error) {
     console.error("Gemini Feed Suggestion Error:", error);
     return [];
@@ -79,6 +81,9 @@ export const analyzeKillChain = async (campaignName: string, actor: string, even
       4. Defensive Recommendations: How can we disrupt this specific kill chain?
       
       Format with clear professional headers.`,
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     });
     return response.text;
   } catch (error) {
@@ -101,6 +106,9 @@ export const generateRemediationPlan = async (cveId: string, title: string) => {
       5. Potential side effects to monitor.
       
       Format with clear headings and bullet points.`,
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     });
     return response.text;
   } catch (error) {
@@ -109,7 +117,6 @@ export const generateRemediationPlan = async (cveId: string, title: string) => {
   }
 };
 
-// Fix: Corrected contents parameter to use Content object with parts array for multimodal data
 export const analyzeVisualForensics = async (base64Image: string, mimeType: string) => {
   const ai = getAIClient();
   try {
@@ -128,6 +135,9 @@ export const analyzeVisualForensics = async (base64Image: string, mimeType: stri
           }
         ],
       },
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     });
     return response.text;
   } catch (error) {
@@ -145,6 +155,9 @@ export const analyzeAnomaly = async (eventDescription: string) => {
       Event Description: ${eventDescription}
       
       Suggest immediate mitigation steps.`,
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
     });
     return response.text;
   } catch (error) {
@@ -162,6 +175,7 @@ export const suggestHuntQueries = async (target: string) => {
       Format the output clearly with explanations for each query.`,
       config: {
         responseMimeType: "application/json",
+        thinkingConfig: { thinkingBudget: 0 },
         responseSchema: {
           type: Type.ARRAY,
           items: {
@@ -176,9 +190,34 @@ export const suggestHuntQueries = async (target: string) => {
         }
       }
     });
-    return JSON.parse(response.text);
+    return JSON.parse(response.text || "[]");
   } catch (error) {
     console.error("Gemini Hunt Generation Error:", error);
     return [];
+  }
+};
+
+export const getMitreTechniqueDetails = async (techniqueId: string, techniqueName: string) => {
+  const ai = getAIClient();
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `Provide a detailed cybersecurity defense briefing for the MITRE ATT&CK technique: ${techniqueName} (${techniqueId}).
+      
+      Your response must include:
+      1. Technical Description: A deep-dive into how this technique is executed by adversaries.
+      2. Data Sources: Specific log sources and telemetry needed to detect this behavior.
+      3. Mitigation Strategies: Engineering and policy controls to prevent or reduce the impact.
+      4. Detection Logic: High-level logic or specific SIGMA/KQL patterns to alert on this activity.
+      
+      Format the output with clear professional headers and structured bullet points.`,
+      config: {
+        thinkingConfig: { thinkingBudget: 0 }
+      }
+    });
+    return response.text;
+  } catch (error) {
+    console.error("MITRE Technique Intel Error:", error);
+    return "Failed to retrieve adversary intelligence for this technique.";
   }
 };

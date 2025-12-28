@@ -21,6 +21,8 @@ export interface ThreatFeed {
   status: 'Healthy' | 'Error' | 'Syncing';
   lastUpdate: string;
   trustScore: number;
+  syncProgress?: number;
+  lastError?: string;
 }
 
 export interface AnomalyEvent {

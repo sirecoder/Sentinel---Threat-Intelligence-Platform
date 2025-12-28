@@ -25,11 +25,15 @@ import {
   Trash2,
   Terminal,
   Shield,
-  // Added missing Clock icon for FeedCard timestamp display
-  Clock
+  Clock,
+  BarChart3,
+  AlertTriangle
 } from 'lucide-react';
+import { ResponsiveContainer, LineChart, Line } from 'recharts';
 import { ThreatFeed } from '../types';
 import { suggestFeeds } from '../services/geminiService';
+
+const MINI_TREND = [{v:10}, {v:15}, {v:12}, {v:20}, {v:18}, {v:25}];
 
 interface FeedAggregatorProps {
   feeds: ThreatFeed[];
@@ -61,7 +65,7 @@ const FeedAggregator: React.FC<FeedAggregatorProps> = ({ feeds, onAdd, onSync })
     const healthyCount = feeds.filter(f => f.status === 'Healthy').length;
     return {
       uptime: ((healthyCount / feeds.length) * 100).toFixed(1),
-      avgTrust: (feeds.reduce((acc, f) => acc + f.trustScore, 0) / feeds.length).toFixed(0),
+      avgTrust: (feeds.reduce((acc, f) => acc + f.trustScore, 0) / (feeds.length || 1)).toFixed(0),
       totalIoCsToday: '124.8k',
       activeSyncs: feeds.filter(f => f.status === 'Syncing').length
     };
@@ -348,76 +352,146 @@ const FeedAggregator: React.FC<FeedAggregatorProps> = ({ feeds, onAdd, onSync })
   );
 };
 
-const FeedCard: React.FC<{ feed: ThreatFeed; onSync: (id: string) => void; onViewLogs: (f: ThreatFeed) => void }> = ({ feed, onSync, onViewLogs }) => (
-  <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all group flex flex-col shadow-lg">
-    <div className="p-5">
-      <div className="flex justify-between items-start mb-4">
-        <div className={`p-2.5 rounded-xl border ${feed.status === 'Syncing' ? 'bg-blue-500/10 border-blue-500/30' : 'bg-slate-800 border-slate-700/50'}`}>
-          {feed.type === 'RSS' ? <Globe className={`w-5 h-5 ${feed.status === 'Syncing' ? 'text-blue-400 animate-pulse' : 'text-slate-400'}`} /> : 
-           feed.type === 'TAXII' ? <ShieldCheck className={`w-5 h-5 ${feed.status === 'Syncing' ? 'text-blue-400 animate-pulse' : 'text-slate-400'}`} /> :
-           <Rss className={`w-5 h-5 ${feed.status === 'Syncing' ? 'text-blue-400 animate-pulse' : 'text-slate-400'}`} />}
-        </div>
-        <div className="flex flex-col items-end">
-          <div className={`flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${
-            feed.status === 'Healthy' ? 'bg-emerald-500/5 text-emerald-400 border-emerald-500/20' : 
-            feed.status === 'Syncing' ? 'bg-blue-500/5 text-blue-400 border-blue-500/20' : 
-            'bg-red-500/5 text-red-400 border-red-500/20'
+const FeedCard: React.FC<{ feed: ThreatFeed; onSync: (id: string) => void; onViewLogs: (f: ThreatFeed) => void }> = ({ feed, onSync, onViewLogs }) => {
+  const isSyncing = feed.status === 'Syncing';
+  const isError = feed.status === 'Error';
+
+  const getSyncStateLabel = () => {
+    if (!feed.syncProgress) return 'INITIALIZING';
+    if (feed.syncProgress < 30) return 'HANDSHAKING';
+    if (feed.syncProgress < 70) return 'PARSING';
+    return 'FINALIZING';
+  };
+
+  return (
+    <div className={`bg-slate-900 border rounded-2xl overflow-hidden transition-all group flex flex-col shadow-lg ${
+      isError ? 'border-red-500/50 shadow-red-500/5' : 'border-slate-800 hover:border-slate-700'
+    }`}>
+      <div className="p-5">
+        <div className="flex justify-between items-start mb-4">
+          <div className={`p-2.5 rounded-xl border transition-all ${
+            isSyncing ? 'bg-blue-500/10 border-blue-500/30' : 
+            isError ? 'bg-red-500/10 border-red-500/30' : 
+            'bg-slate-800 border-slate-700/50'
           }`}>
-            <div className={`w-1.5 h-1.5 rounded-full ${
-              feed.status === 'Healthy' ? 'bg-emerald-500' : 
-              feed.status === 'Syncing' ? 'bg-blue-500 animate-pulse' : 'bg-red-500'
-            }`} />
-            {feed.status}
+            {feed.type === 'RSS' ? <Globe className={`w-5 h-5 ${isSyncing ? 'text-blue-400 animate-pulse' : isError ? 'text-red-400' : 'text-slate-400'}`} /> : 
+             feed.type === 'TAXII' ? <ShieldCheck className={`w-5 h-5 ${isSyncing ? 'text-blue-400 animate-pulse' : isError ? 'text-red-400' : 'text-slate-400'}`} /> :
+             <Rss className={`w-5 h-5 ${isSyncing ? 'text-blue-400 animate-pulse' : isError ? 'text-red-400' : 'text-slate-400'}`} />}
           </div>
-          <span className="text-[9px] text-slate-600 mt-1 uppercase font-black tracking-widest">{feed.type} TRANSPORT</span>
+          <div className="flex flex-col items-end">
+            <div className={`flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border transition-all ${
+              feed.status === 'Healthy' ? 'bg-emerald-500/5 text-emerald-400 border-emerald-500/20' : 
+              isSyncing ? 'bg-blue-500/5 text-blue-400 border-blue-500/20' : 
+              'bg-red-500/5 text-red-400 border-red-500/20'
+            }`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${
+                feed.status === 'Healthy' ? 'bg-emerald-500' : 
+                isSyncing ? 'bg-blue-500 animate-pulse' : 'bg-red-500'
+              }`} />
+              {isSyncing ? getSyncStateLabel() : feed.status}
+            </div>
+            <span className="text-[9px] text-slate-600 mt-1 uppercase font-black tracking-widest">{feed.type} TRANSPORT</span>
+          </div>
         </div>
-      </div>
 
-      <h3 className="text-sm font-bold text-white mb-0.5 group-hover:text-blue-400 transition-colors truncate">{feed.name}</h3>
-      <p className="text-[10px] text-slate-500 truncate mb-4 font-mono">{feed.url}</p>
+        <h3 className="text-sm font-bold text-white mb-0.5 group-hover:text-blue-400 transition-colors truncate">{feed.name}</h3>
+        <p className="text-[10px] text-slate-500 truncate mb-4 font-mono">{feed.url}</p>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
-          <span className="block text-[8px] text-slate-600 uppercase font-black mb-1">Reliability</span>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-black text-white font-mono">{feed.trustScore}%</span>
-            <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-               <div className={`h-full ${feed.trustScore > 80 ? 'bg-emerald-500' : 'bg-yellow-500'}`} style={{ width: `${feed.trustScore}%` }} />
+        {isSyncing ? (
+          <div className="space-y-3 mb-4 animate-in fade-in duration-300">
+             <div className="flex justify-between items-center mb-1">
+               <span className="text-[9px] font-black text-blue-500 uppercase tracking-tighter">Sync Progress</span>
+               <span className="text-[10px] font-mono text-blue-400">{feed.syncProgress}%</span>
+             </div>
+             <div className="h-1.5 w-full bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                <div 
+                  className="h-full bg-blue-500 transition-all duration-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
+                  style={{ width: `${feed.syncProgress}%` }} 
+                />
+             </div>
+             <div className="flex justify-between items-center text-[8px] font-mono text-slate-600 uppercase">
+                <span>Ingest: {((feed.syncProgress || 0) * 12.4).toFixed(1)}MB</span>
+                <span className="animate-pulse">Active Stream...</span>
+             </div>
+          </div>
+        ) : isError ? (
+          <div className="p-3 bg-red-500/5 border border-red-500/20 rounded-xl mb-4 space-y-2 animate-in slide-in-from-top-2">
+            <div className="flex items-center gap-2 text-red-400">
+               <AlertTriangle className="w-3 h-3" />
+               <span className="text-[9px] font-black uppercase">Technical Diagnostics</span>
+            </div>
+            <p className="text-[10px] text-red-300 leading-relaxed font-medium italic">
+              {feed.lastError || 'Unexpected server response: 502 Bad Gateway.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+              <span className="block text-[8px] text-slate-600 uppercase font-black mb-1 flex items-center gap-1">
+                <BarChart3 className="w-2.5 h-2.5" />
+                Reliability
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-black text-white font-mono">{feed.trustScore}%</span>
+                <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                   <div className={`h-full ${feed.trustScore > 80 ? 'bg-emerald-500' : 'bg-yellow-500'}`} style={{ width: `${feed.trustScore}%` }} />
+                </div>
+              </div>
+            </div>
+            <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
+              <span className="block text-[8px] text-slate-600 uppercase font-black mb-1">Heartbeat</span>
+              <span className="text-xs font-bold text-slate-300 flex items-center gap-1">
+                 <Clock className="w-3 h-3 text-slate-600" />
+                 {feed.lastUpdate}
+              </span>
             </div>
           </div>
-        </div>
-        <div className="p-2.5 bg-slate-950 rounded-xl border border-slate-800">
-          <span className="block text-[8px] text-slate-600 uppercase font-black mb-1">Last Handshake</span>
-          <span className="text-xs font-bold text-slate-300 flex items-center gap-1">
-             <Clock className="w-3 h-3 text-slate-600" />
-             {feed.lastUpdate}
-          </span>
-        </div>
+        )}
+
+        {/* Mini NOC-style sparkline (Matching user image request) */}
+        {!isSyncing && !isError && (
+          <div className="h-10 w-full mb-2 opacity-40 group-hover:opacity-80 transition-opacity">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={MINI_TREND}>
+                <Line 
+                  type="monotone" 
+                  dataKey="v" 
+                  stroke={feed.status === 'Healthy' ? '#10b981' : '#3b82f6'} 
+                  strokeWidth={1.5} 
+                  dot={false} 
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div className={`mt-auto border-t p-3 flex gap-2 ${isError ? 'bg-red-500/5 border-red-500/20' : 'bg-slate-800/20 border-slate-800'}`}>
+        <button 
+          disabled={isSyncing}
+          onClick={() => onSync(feed.id)}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest border transition-all active:scale-95 ${
+            isError ? 'bg-red-600 hover:bg-red-500 text-white border-red-500' : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+          } disabled:opacity-50`}
+        >
+          {isSyncing ? <Loader2 className="w-3 h-3 animate-spin" /> : isError ? <Zap className="w-3 h-3" /> : <RefreshCcw className="w-3 h-3" />}
+          {isError ? 'RETRY' : 'SYNC'}
+        </button>
+        <button 
+          onClick={() => onViewLogs(feed)}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-700 transition-all active:scale-95"
+        >
+          <History className="w-3 h-3" />
+          Logs
+        </button>
+        <button className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700">
+          <MoreVertical className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
-
-    <div className="mt-auto border-t border-slate-800 bg-slate-800/20 p-3 flex gap-2">
-      <button 
-        disabled={feed.status === 'Syncing'}
-        onClick={() => onSync(feed.id)}
-        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-700 transition-all active:scale-95"
-      >
-        {feed.status === 'Syncing' ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCcw className="w-3 h-3" />}
-        Sync
-      </button>
-      <button 
-        onClick={() => onViewLogs(feed)}
-        className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[10px] font-black uppercase tracking-widest border border-slate-700 transition-all active:scale-95"
-      >
-        <History className="w-3 h-3" />
-        Logs
-      </button>
-      <button className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700">
-        <MoreVertical className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  </div>
-);
+  );
+};
 
 const HealthCard: React.FC<{ title: string; value: string; sub: string; icon: React.ReactNode }> = ({ title, value, sub, icon }) => (
   <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-sm relative overflow-hidden group hover:border-slate-700 transition-all">

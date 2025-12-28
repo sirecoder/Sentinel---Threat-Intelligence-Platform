@@ -34,6 +34,7 @@ const App: React.FC = () => {
   const [feeds, setFeeds] = useState<ThreatFeed[]>(MOCK_FEEDS);
   const [anomalies, setAnomalies] = useState<AnomalyEvent[]>(MOCK_ANOMALIES);
   const [targetAnomalyId, setTargetAnomalyId] = useState<string | null>(null);
+  const [huntTarget, setHuntTarget] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
@@ -82,11 +83,45 @@ const App: React.FC = () => {
   };
 
   const syncFeed = (id: string) => {
-    setFeeds(prev => prev.map(f => f.id === id ? { ...f, status: 'Syncing' } : f));
-    setTimeout(() => {
-      setFeeds(prev => prev.map(f => f.id === id ? { ...f, status: 'Healthy', lastUpdate: 'Just now' } : f));
-      notify('Feed synchronization complete', 'success');
-    }, 2000);
+    // Initial State: Reset progress and set to Syncing
+    setFeeds(prev => prev.map(f => f.id === id ? { ...f, status: 'Syncing', syncProgress: 0, lastError: undefined } : f));
+    
+    // Simulation stages
+    const stages = [
+      { progress: 15, delay: 500 },
+      { progress: 45, delay: 1200 },
+      { progress: 85, delay: 2000 },
+      { progress: 100, delay: 2800 }
+    ];
+
+    stages.forEach((stage, index) => {
+      setTimeout(() => {
+        setFeeds(prev => prev.map(f => {
+          if (f.id !== id) return f;
+          
+          // Randomly trigger error at 45% for simulation occasionally
+          const shouldFail = index === 1 && Math.random() > 0.85;
+          if (shouldFail) {
+            return { 
+              ...f, 
+              status: 'Error', 
+              syncProgress: stage.progress,
+              lastError: 'TLS Handshake Failure: Remote host closed connection abruptly.' 
+            };
+          }
+
+          if (stage.progress === 100) {
+            return { ...f, status: 'Healthy', syncProgress: undefined, lastUpdate: 'Just now' };
+          }
+          
+          return { ...f, syncProgress: stage.progress };
+        }));
+
+        if (stage.progress === 100) {
+          notify('Feed synchronization complete', 'success');
+        }
+      }, stage.delay);
+    });
   };
 
   const handleExportReport = (format: string) => {
@@ -139,9 +174,9 @@ const App: React.FC = () => {
     switch (activeTab) {
       case 'dashboard': return <DashboardHome stats={stats} onNewScan={runNewScan} isScanning={isScanning} onExportReport={handleExportReport} isExporting={isExporting} onNavigate={setActiveTab} anomalies={anomalies} onAlertClick={handleAlertJump} />;
       case 'iocs': return <IoCManager iocs={iocs} onDelete={deleteIoC} onAdd={addIoC} onBulkCleanup={bulkCleanupIocs} globalSearch={searchQuery} />;
-      case 'hunting': return <ThreatHunter />;
+      case 'hunting': return <ThreatHunter initialTarget={huntTarget} onHuntStart={() => setHuntTarget(null)} />;
       case 'campaigns': return <CampaignTimeline campaigns={MOCK_CAMPAIGNS} />;
-      case 'mitre': return <MitreMatrix />;
+      case 'mitre': return <MitreMatrix onNavigate={setActiveTab} onHuntRequest={(target) => setHuntTarget(target)} />;
       case 'vulnerabilities': return <VulnerabilityExplorer />;
       case 'feeds': return <FeedAggregator feeds={feeds} onAdd={addFeed} onSync={syncFeed} />;
       case 'anomalies': return <AnomalyDetection anomalies={anomalies} onUpdateStatus={updateAnomalyStatus} globalSearch={searchQuery} initialTargetId={targetAnomalyId} onAnalysisStart={() => setTargetAnomalyId(null)} />;

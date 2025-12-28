@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, 
   Terminal, 
@@ -33,7 +33,12 @@ interface HuntLog {
   details: string;
 }
 
-const ThreatHunter: React.FC = () => {
+interface ThreatHunterProps {
+  initialTarget?: string | null;
+  onHuntStart?: () => void;
+}
+
+const ThreatHunter: React.FC<ThreatHunterProps> = ({ initialTarget, onHuntStart }) => {
   const [huntingTarget, setHuntingTarget] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [queries, setQueries] = useState<any[]>([]);
@@ -41,10 +46,20 @@ const ThreatHunter: React.FC = () => {
   const [huntResults, setHuntResults] = useState<HuntLog[] | null>(null);
   const [activeQuery, setActiveQuery] = useState<any | null>(null);
 
-  const handleGenerate = async () => {
-    if (!huntingTarget) return;
+  useEffect(() => {
+    if (initialTarget) {
+      setHuntingTarget(initialTarget);
+      // Automatically trigger generation for a smoother jump experience
+      handleGenerate(initialTarget);
+      if (onHuntStart) onHuntStart();
+    }
+  }, [initialTarget]);
+
+  const handleGenerate = async (targetOverride?: string) => {
+    const target = targetOverride || huntingTarget;
+    if (!target) return;
     setIsGenerating(true);
-    const results = await suggestHuntQueries(huntingTarget);
+    const results = await suggestHuntQueries(target);
     setQueries(results);
     setIsGenerating(false);
   };
@@ -285,13 +300,15 @@ const ThreatHunter: React.FC = () => {
               <input 
                 type="text"
                 placeholder="e.g., 'Lateral movement using RDP' or 'Cobalt Strike beaconing behavior'"
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-6 py-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg shadow-inner"
+                className={`flex-1 bg-slate-950 border border-slate-800 rounded-xl px-6 py-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg shadow-inner ${
+                  initialTarget ? 'ring-2 ring-blue-500/50' : ''
+                }`}
                 value={huntingTarget}
                 onChange={(e) => setHuntingTarget(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
               />
               <button 
-                onClick={handleGenerate}
+                onClick={() => handleGenerate()}
                 disabled={isGenerating || !huntingTarget}
                 className="bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white px-8 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/20 flex items-center gap-3"
               >
