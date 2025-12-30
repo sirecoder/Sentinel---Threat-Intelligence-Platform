@@ -13,6 +13,7 @@ import MitigationConsole from './components/MitigationConsole';
 import SentinelVoiceAssistant from './components/SentinelVoiceAssistant';
 import Login from './components/Login';
 import AccessDenied from './components/AccessDenied';
+import { supabase } from './lib/supabase';
 import { 
   Bell, 
   Search, 
@@ -55,6 +56,61 @@ const App: React.FC = () => {
   
   const notificationRef = useRef<HTMLDivElement>(null);
 
+  // Initialize Supabase Auth and Session
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          mapSupabaseUserToSentinel(session.user);
+        }
+      } catch (err) {
+        console.error("Auth initialization failed:", err);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        mapSupabaseUserToSentinel(session.user);
+      } else {
+        setUser(null);
+      }
+    });
+
+    initSession();
+    fetchCloudData();
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const mapSupabaseUserToSentinel = (sbUser: any) => {
+    setUser({
+      id: sbUser.id,
+      name: sbUser.user_metadata?.name || sbUser.email?.split('@')[0],
+      email: sbUser.email || '',
+      role: (sbUser.user_metadata?.role as UserRole) || 'Tier-1 (Viewer)',
+      lastLogin: sbUser.last_sign_in_at || new Date().toISOString()
+    });
+  };
+
+  const fetchCloudData = async () => {
+    try {
+      // Sync IoCs - Graceful fallback if table doesn't exist
+      const { data: iocData, error: iocError } = await supabase.from('iocs').select('*');
+      if (!iocError && iocData) {
+        setIocs([...MOCK_IOCS, ...iocData]);
+      }
+
+      // Sync Saved Hunts - Graceful fallback if table doesn't exist
+      const { data: huntData, error: huntError } = await supabase.from('saved_hunts').select('*');
+      if (!huntError && huntData) {
+        setSavedHunts(huntData);
+      }
+    } catch (err) {
+      console.warn("Supabase Sync skipped: Tables may not be initialized yet.");
+    }
+  };
+
   const getRoleLevel = (role?: UserRole) => {
     if (!role) return 0;
     if (role.includes('Tier-3')) return 3;
@@ -94,10 +150,11 @@ const App: React.FC = () => {
 
   const handleLogin = (authenticatedUser: User) => {
     setUser(authenticatedUser);
-    notify(`Welcome back, ${authenticatedUser.name}. Clearance: ${authenticatedUser.role.split(' ')[0]}`, 'success');
+    notify(`Session authorized. Clearance: ${authenticatedUser.role}`, 'success');
   };
 
-  const confirmLogout = () => {
+  const confirmLogout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     setIsLogoutModalOpen(false);
     notify('Session terminated successfully.', 'info');
@@ -107,32 +164,54 @@ const App: React.FC = () => {
     setIsLogoutModalOpen(true);
   };
 
-  const handleSaveHunt = (hunt: SavedHunt) => {
-    setSavedHunts(prev => [hunt, ...prev]);
-    notify(`Hunt saved: ${hunt.name}`, 'success');
+  const handleSaveHunt = async (hunt: SavedHunt) => {
+    const { error } = await supabase.from('saved_hunts').insert([hunt]);
+    if (error) {
+      console.error("Failed to save hunt to cloud:", error.message);
+      // Fallback to local state if DB failed
+      setSavedHunts(prev => [hunt, ...prev]);
+    } else {
+      setSavedHunts(prev => [hunt, ...prev]);
+      notify(`Hunt saved to cloud: ${hunt.name}`, 'success');
+    }
   };
 
-  const handleDeleteSavedHunt = (id: string) => {
-    setSavedHunts(prev => prev.filter(h => h.id !== id));
-    notify('Saved hunt removed.', 'info');
+  const handleDeleteSavedHunt = async (id: string) => {
+    const { error } = await supabase.from('saved_hunts').delete().eq('id', id);
+    if (!error) {
+      setSavedHunts(prev => prev.filter(h => h.id !== id));
+      notify('Saved hunt purged from cloud.', 'info');
+    }
   };
 
-  const addIoC = (ioc: IoCRecord) => {
+  const addIoC = async (ioc: IoCRecord) => {
     if (userLevel < 2) return;
-    setIocs(prev => [ioc, ...prev]);
-    notify(`New IoC added: ${ioc.value}`, 'success');
+    const { error } = await supabase.from('iocs').insert([ioc]);
+    if (error) {
+      console.error("Failed to persist IoC:", error.message);
+      setIocs(prev => [ioc, ...prev]);
+    } else {
+      setIocs(prev => [ioc, ...prev]);
+      notify(`New IoC registered: ${ioc.value}`, 'success');
+    }
   };
 
-  const deleteIoC = (id: string) => {
+  const deleteIoC = async (id: string) => {
     if (userLevel < 3) return;
-    setIocs(prev => prev.filter(i => i.id !== id));
-    notify('IoC removed from database', 'info');
+    const { error } = await supabase.from('iocs').delete().eq('id', id);
+    if (!error) {
+      setIocs(prev => prev.filter(i => i.id !== id));
+      notify('IoC removed from database', 'info');
+    }
   };
 
-  const bulkCleanupIocs = (ids: string[]) => {
+  const bulkCleanupIocs = async (ids: string[]) => {
     if (userLevel < 3) return;
-    setIocs(prev => prev.filter(i => !ids.includes(i.id)));
-    notify(`Cleaned up ${ids.length} expired indicators.`, 'success');
+    const { error } = await supabase.from('iocs').delete().in('id', ids);
+    if (!error) {
+      setIocs(prev => prev.filter(i => !ids.includes(i.id)));
+      notify(`Cleaned up ${ids.length} expired indicators.`, 'success');
+    }
   };
 
   const addFeed = (feed: ThreatFeed) => {
@@ -343,7 +422,7 @@ const App: React.FC = () => {
               <div className="h-8 w-[1px] bg-slate-800 mx-1 md:mx-2" />
               
               <div className="relative group">
-                <div className="flex items-center gap-2 md:gap-3 pl-1 md:pl-2 cursor-pointer">
+                <div className="flex items-center gap-3 pl-2 cursor-pointer">
                   <div className="text-right hidden sm:block">
                     <p className="text-xs md:text-sm font-bold text-white group-hover:text-blue-400 transition-colors">{user.name}</p>
                     <p className="text-[8px] md:text-[10px] text-slate-500 uppercase tracking-widest font-black truncate">{user.role.split(' ')[0]}</p>
