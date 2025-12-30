@@ -63,15 +63,22 @@ const App: React.FC = () => {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           mapSupabaseUserToSentinel(session.user);
+          // If we came from a redirect, clear the hash
+          if (window.location.hash) {
+            window.history.replaceState(null, '', window.location.pathname);
+          }
         }
       } catch (err) {
         console.error("Auth initialization failed:", err);
       }
     };
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (session?.user) {
         mapSupabaseUserToSentinel(session.user);
+        if (event === 'SIGNED_IN') {
+          notify(`Session synchronized via ${event}`, 'success');
+        }
       } else {
         setUser(null);
       }
@@ -95,13 +102,11 @@ const App: React.FC = () => {
 
   const fetchCloudData = async () => {
     try {
-      // Sync IoCs - Graceful fallback if table doesn't exist
       const { data: iocData, error: iocError } = await supabase.from('iocs').select('*');
       if (!iocError && iocData) {
         setIocs([...MOCK_IOCS, ...iocData]);
       }
 
-      // Sync Saved Hunts - Graceful fallback if table doesn't exist
       const { data: huntData, error: huntError } = await supabase.from('saved_hunts').select('*');
       if (!huntError && huntData) {
         setSavedHunts(huntData);
@@ -167,8 +172,6 @@ const App: React.FC = () => {
   const handleSaveHunt = async (hunt: SavedHunt) => {
     const { error } = await supabase.from('saved_hunts').insert([hunt]);
     if (error) {
-      console.error("Failed to save hunt to cloud:", error.message);
-      // Fallback to local state if DB failed
       setSavedHunts(prev => [hunt, ...prev]);
     } else {
       setSavedHunts(prev => [hunt, ...prev]);
@@ -188,7 +191,6 @@ const App: React.FC = () => {
     if (userLevel < 2) return;
     const { error } = await supabase.from('iocs').insert([ioc]);
     if (error) {
-      console.error("Failed to persist IoC:", error.message);
       setIocs(prev => [ioc, ...prev]);
     } else {
       setIocs(prev => [ioc, ...prev]);
@@ -353,19 +355,16 @@ const App: React.FC = () => {
                   )}
                 </button>
 
-                {/* NOTIFICATION HUB DROPDOWN */}
                 {showNotifications && (
                   <div className="absolute top-full right-0 mt-3 w-[320px] md:w-[400px] bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-[100] overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
                     <div className="p-4 border-b border-slate-800 bg-slate-800/30 flex justify-between items-center">
                        <div>
                          <h3 className="text-xs font-black text-white uppercase tracking-widest">Command Alert Hub</h3>
-                         <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Monitoring {anomalies.length} signal streams</p>
                        </div>
                        {newAlerts.length > 0 && (
                          <button 
                           onClick={clearAllNotifications}
                           className="p-2 text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all flex items-center gap-2 group"
-                          title="Mark All Read"
                          >
                            <CheckCircle2 className="w-4 h-4" />
                            <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">Global Reset</span>
@@ -396,24 +395,11 @@ const App: React.FC = () => {
                                   <span className="text-[8px] text-slate-600 font-mono shrink-0 ml-2">{new Date(alert.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                 </div>
                                 <p className="text-[10px] text-slate-400 line-clamp-2 leading-relaxed">{alert.description}</p>
-                                <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <span className="text-[8px] font-black text-blue-500 uppercase tracking-widest">Initiate AI Triage</span>
-                                  <ChevronRight className="w-3 h-3 text-blue-500" />
-                                </div>
                               </div>
                             </div>
                           ))}
                         </div>
                       )}
-                    </div>
-
-                    <div className="p-3 bg-slate-950/50 border-t border-slate-800">
-                      <button 
-                        onClick={() => { setActiveTab('anomalies'); setShowNotifications(false); }}
-                        className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
-                      >
-                        Review Full Anomaly Registry
-                      </button>
                     </div>
                   </div>
                 )}
@@ -449,7 +435,6 @@ const App: React.FC = () => {
       
       {user && <SentinelVoiceAssistant />}
       
-      {/* Logout Confirmation Modal */}
       {isLogoutModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
@@ -459,23 +444,10 @@ const App: React.FC = () => {
               </div>
               <div className="space-y-2">
                 <h3 className="text-xl font-black text-white uppercase tracking-tighter">Terminate Active Session?</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">
-                  Ending this session will disconnect all neural bridges and clear volatile tactical telemetry. This action is irreversible.
-                </p>
               </div>
               <div className="flex flex-col gap-3">
-                <button 
-                  onClick={confirmLogout}
-                  className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-xl shadow-red-600/20 active:scale-[0.98]"
-                >
-                  Confirm Termination
-                </button>
-                <button 
-                  onClick={() => setIsLogoutModalOpen(false)}
-                  className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl text-xs uppercase tracking-widest border border-slate-700 transition-all"
-                >
-                  Return to Command
-                </button>
+                <button onClick={confirmLogout} className="w-full py-4 bg-red-600 hover:bg-red-500 text-white font-black rounded-xl text-xs uppercase tracking-widest transition-all shadow-xl shadow-red-600/20 active:scale-[0.98]">Confirm Termination</button>
+                <button onClick={() => setIsLogoutModalOpen(false)} className="w-full py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-black rounded-xl text-xs uppercase tracking-widest border border-slate-700 transition-all">Return to Command</button>
               </div>
             </div>
           </div>
